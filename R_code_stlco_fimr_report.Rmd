@@ -1,0 +1,1429 @@
+---
+title: "stlco_fimr_report"
+author: "Michael Royce Tan"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+header-includes:
+  - \usepackage{helvet}
+  - \usepackage[T1]{fontenc}
+  - \renewcommand{\familydefault}{\sfdefault}
+geometry: 
+  - top = 0.8in
+  - bottom = 0.5in
+  - left = 0.5in
+  - right = 0.5in
+editor_options:
+  chunk_output_type: console
+---
+
+<!-- ## r chuck global settings -->
+```{r setup, include=FALSE}
+# sets global default options for all code chunks
+knitr::opts_chunk$set(
+  echo = FALSE,            # hide code
+  eval = TRUE,             # run code
+  warning = FALSE,         # hide warnings
+  message = FALSE,         # hide messages
+  error = FALSE,           # stop rendering on errors
+  fig.align = "center",    # center figures
+  fig.width = 8,           # 
+  fig.asp = 0.618,
+  out.width = "\\textwidth",
+  fig.path = "figs/",
+  dpi = 300,               # high resolution figures
+  tidy = FALSE,            # don't reformat code
+  cache = FALSE,           # don't cache
+  comment = "#>"           # comment prefix
+  )
+```
+
+
+<!-- ### Pre-requisites -->
+```{r, echo=FALSE, results='hide'}
+# Load libraries
+# library(tidyverse)
+library(here)
+library(readr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(scales)
+library(purrr)
+
+
+```
+
+
+<!-- # Importing and Saving Data -->
+```{r, eval=FALSE, results='hide'}
+
+# Importing data to R environment
+ext_stlco_births <- read_csv(here::here("data", "stlco_birth.csv"))
+ext_stlco_fetal_deaths <- read_csv(here::here("data", "stlco_fetal-death.csv"))
+
+# create directory
+dir.create(here::here("data", "raw"), recursive = TRUE)
+
+# Saving data as rds
+saveRDS(ext_stlco_births, here::here("data", "raw", "stlco_births.rds"))
+saveRDS(ext_stlco_fetal_deaths, here::here("data", "raw", "stlco_fetal_deaths.rds"))
+
+```
+
+
+<!-- # Clean Up R environment after Saving -->
+```{r, eval=FALSE, results='hide'}
+
+#remove all objects from R environment
+rm(list = ls())
+
+# clean-up memory, trigger garbage collection
+gc()
+```
+
+
+<!-- # Loading Raw Data -->
+```{r, results='hide'}
+
+#Loading rds data
+stlco_births <- readRDS(here::here("data", "raw", "stlco_births.rds"))
+stlco_fetal_deaths <- readRDS(here::here("data", "raw", "stlco_fetal_deaths.rds"))
+
+```
+
+
+<!-- # Explore Data -->
+```{r, eval=FALSE, results='hide'}
+
+# Explore stlco_births Data
+glimpse(stlco_births)
+
+# statistic summary
+summary(stlco_births)
+
+# Exploring unique values of each column
+stlco_births |> 
+  dplyr::distinct(year)
+stlco_births |> 
+  dplyr::distinct(sex)
+stlco_births |> 
+  dplyr::distinct(mom_race)
+
+# Exploring mom_age 
+invalid_mom_birth_age_count <- stlco_births |> 
+  dplyr::filter(mom_age < 0) |>
+  tally()
+invalid_mom_birth_age_count
+
+stlco_births |> 
+  dplyr::filter(mom_age > 0 & mom_age < 12) |>
+  tally()
+
+# Explore stlco_births Data
+glimpse(stlco_fetal_deaths)
+
+summary(stlco_fetal_deaths)
+
+stlco_fetal_deaths |> 
+  dplyr::distinct(year)
+stlco_fetal_deaths |> 
+  dplyr::distinct(sex)
+stlco_fetal_deaths |> 
+  dplyr::distinct(mom_race)
+
+# observations with mom birth age < 0
+invalid_mom_birth_age_count
+
+```
+
+
+<!-- ## Checking Missing Data -->
+```{r, eval=FALSE, results='hide'}
+
+
+#Check for missing data in births
+#stlco_births |> is.na() |> colSums()
+#colSums(is.na(stlco_births))
+
+missing_count_stlco_births <- stlco_births |> 
+  dplyr::summarise(across(everything(), ~ sum(is.na(.)))) |>
+  tidyr::pivot_longer(everything(), names_to = "column", values_to = "n_missing") |>
+  filter(n_missing > 0)
+missing_count_stlco_births
+
+#Check for missing data in fetal deaths
+#stlco_fetal_deaths |> is.na() |> colSums()
+#colSums(is.na(stlco_births))
+
+missing_count_stlco_fetal_deaths <- stlco_fetal_deaths |> 
+  dplyr::summarise(across(everything(), ~ sum(is.na(.)))) |>
+  tidyr::pivot_longer(everything(), names_to = "column", values_to = "n_missing") |>
+  dplyr::filter(n_missing > 0)
+missing_count_stlco_fetal_deaths
+
+```
+
+
+\newpage
+\vspace*{0.1in}
+## Fetal Mortality Rate, Saint Louis County 2019 to 2023
+
+\[
+\text{Fetal mortality rate} =
+\frac{\text{Fetal deaths at 20 weeks of gestation or more}}
+{\text{Live births and fetal deaths at 20 weeks or more}}
+\times 1{,}000
+\]
+
+\vspace*{0.3in}
+For Normal Distribution (deaths $\ge$ 100):
+
+\[
+\begin{aligned}
+\text{Lower: } & R_1 - 1.96 * R_1 * \frac{\text{RSE}(R_1)}{100} \\
+\text{Upper: } & R_1 + 1.96 * R_1 * \frac{\text{RSE}(R_1)}{100}
+\end{aligned}
+\]
+
+\[
+\text{RSE of the fetal mortality rate:} \\[10pt]
+\text{RSE} = 100 * \sqrt{\frac{1}{D} + \frac{1}{B}}
+\]
+
+\vspace*{0.3in}
+For Poisson Distribution (deaths < 100):
+
+\[
+\begin{aligned}
+\text{Lower: } & R_1 \cdot L(0.95, D_{\text{adj}}) \\
+\text{Upper: } & R_1 \cdot U(0.95, D_{\text{adj}})
+\end{aligned}
+\]
+
+\[
+D_{\text{adj}} = \frac{D \bullet B}{D + B}
+\]
+
+Using the CDC Poisson L/U confidence-limit table for fetal and perinatal mortality rates.
+Using qchisq in R, same values as the CDC Poisson L/U confidence-limit table
+
+\[
+\begin{aligned}
+L &= \frac{\text{qchisq}(0.025, 2n)}{2n} \\[8pt]
+U &= \frac{\text{qchisq}(0.975, 2(n+1))}{2n}
+\end{aligned}
+\]
+
+```{r}
+# Count total fetal deaths (20 weeks+)
+total_fetal_deaths <- stlco_fetal_deaths |>
+  dplyr::summarise(fetal_deaths = n())
+
+# Count total live births
+total_live_births <- stlco_births |>
+  dplyr::summarise(live_births = n())
+
+
+# Calculate fetal mortality rate
+fmr_overall <- total_fetal_deaths |>
+  dplyr::bind_cols(total_live_births) |>
+  dplyr::mutate(
+    total = fetal_deaths + live_births,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  )
+
+#fmr_overall
+```
+
+
+<!-- ## Custom Functions for Calculating CI -->
+
+```{r}
+# Function for calculating Relative Standard Error, Normal Distribution
+calculate_rse <- function(fetal_deaths, total) {
+  rse <- 100 * sqrt((1/fetal_deaths) + (1/total))
+}
+
+# Function for adjusted fetal deaths for poisson distribution
+calculate_adj_fetal_deaths <- function(fetal_deaths, total) {
+  adj_fetal_deaths <- round((fetal_deaths * total) / (fetal_deaths + total))
+}
+
+# Function for Lower and Upper Limit multiplier for poisson distribution
+# Using the CDC Poisson L/U confidence-limit table for fetal and perinatal mortality rates.
+# Using qchisq, same values as the CDC Poisson L/U confidence-limit table
+l_poisson <- function(n) {
+  qchisq(0.025, 2*n) / (2*n)
+}
+
+u_poisson <- function(n) {
+  qchisq(0.975, 2*(n+1)) / (2*n)
+}
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: overall_fetal_mortality_rate
+
+fmr_overall_ci <- fmr_overall |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#fmr_overall_ci
+```
+
+```{r}
+# Table using kable
+# data: overall_fetal_mortality_rate_ci
+
+table_fmr_overall_ci <- fmr_overall_ci |>
+  select(fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total))
+
+kable_fmr_overall_ci <- table_fmr_overall_ci |>
+  knitr::kable(
+    col.names = c(
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate, Saint Louis County, 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 3, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_fmr_overall_ci
+#kable_fmr_overall_ci
+```
+
+\newpage
+### Table 1: Overall Fetal Mortality Rate, Saint Louis County, 2019 to 2023
+```{r table_01, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_fmr_overall_ci
+```
+
+
+
+
+<!-- ## Trend: Annual Fetal Mortality Rate, Saint Louis County 2019 to 2023 -->
+```{r}
+
+# Calculate annual fetal mortality rate, 2019 to 2023
+fmr_annual <- stlco_fetal_deaths |>
+  dplyr::count(year, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> dplyr::count(year, name = "live_births"),
+    by = "year"
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  )
+
+#fmr_annual
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: fmr_annual
+
+fmr_annual_ci <- fmr_annual |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#fmr_annual_ci
+```
+
+```{r}
+# Table using kable
+# data: fmr_annual_ci
+
+table_fmr_annual_ci <- fmr_annual_ci |>
+  select(year,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total))
+
+kable_fmr_annual_ci <- table_fmr_annual_ci |>
+  knitr::kable(
+    col.names = c(
+      "Year",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Annual Fetal Mortality Rate, Saint Louis County 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 4, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_fmr_annual_ci
+#kable_fmr_annual_ci
+```
+
+### Table 2: Annual Fetal Mortality Rate, Saint Louis County, 2019 to 2023
+```{r table_02, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_fmr_annual_ci
+```
+
+```{r}
+# function for custom scale
+size <- list(
+    xxl = 12*1.618,
+    xl = 11*1.618,
+    lg = 10*1.618,
+    md = 9*1.618,
+    base = 7*1.618,
+    sm = 6*1.618,
+    xs = 5*1.618,
+    xxs = 4*1.618,
+    ss = 3*1.618)
+```
+
+
+```{r}
+# Plot
+# data: table_fmr_annual_ci
+
+plot_fmr_annual_ci <- ggplot(table_fmr_annual_ci, aes(year, fmr_per_1000)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), 
+              alpha = 0.2, 
+              fill = "#2c3e50") +
+  geom_line(
+    linewidth = 1.2,
+    color = "#2c3e50") +
+  geom_point(
+    size = 3,
+    color = "#2c3e50")+
+  geom_text(
+    aes(label = sprintf("%.2f", fmr_per_1000)),
+    vjust = -1.5,
+    hjust = -0.1) +
+  scale_y_continuous(
+    limits = c(0, 9),
+    breaks = seq(0, 9, 2)) +
+  labs(
+    title = "Annual Fetal Mortality Rate, St. Louis County 2019-2023",
+    subtitle = "Rate per 1,000 live births and fetal deaths",
+    x = NULL,
+    y = "FMR",
+    caption = "Shaded area represents 95% confidence interval") +
+  theme(
+    plot.margin = margin(20, 20, 20, 20, "pt"),
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = size$base),
+    axis.text = element_text(size = size$sm),
+    #legend.title = element_text(size = size$sm),
+    #legend.text = element_text(size = size$sm),
+    plot.title = element_text(size = size$lg,
+                              margin = margin(b = 5)),
+    plot.subtitle = element_text(size = size$base,
+                                 margin = margin(b = 3)),
+    plot.caption = element_text(hjust = 0,
+                                size = size$sm),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_rect(
+      color = "grey95",
+      fill = NA,
+      linewidth = 0.5),     # inside plot border
+    panel.background = element_rect(
+      color = NA,
+      fill = "grey98"),    # only inside plot area
+    plot.background = element_rect(
+      color = "white",
+      fill = NA,            # fill all plot area
+      linewidth = 0)
+  )
+  
+#plot_fmr_annual_ci
+
+```
+
+### Figure 1: Annual Fetal Mortality Rate, Saint Louis County, 2019 to 2023
+```{r figure_01, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+plot_fmr_annual_ci
+```
+
+
+
+<!-- # Fetal Mortality Rate by Racial Groups -->
+```{r}
+
+# Calculate annual fetal mortality rate by race, Saint Louis County 2019 to 2023
+fmr_race <- stlco_fetal_deaths |>
+  dplyr::count(mom_race, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> dplyr::count(mom_race, name = "live_births"),
+    by = "mom_race"
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) |>
+  dplyr::arrange(
+    desc(fetal_deaths)
+  )
+
+#fmr_race
+
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: fmr_race
+
+fmr_race_ci <- fmr_race |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#fmr_race_ci
+
+```
+
+
+```{r}
+# Tables using kable
+# data: fmr_race_ci
+
+table_fmr_race_ci <- fmr_race_ci |>
+  select(mom_race,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total),
+    mom_race = case_when(
+      mom_race == "black" ~ "Black",
+      mom_race == "white" ~ "White",
+      mom_race == "other" ~ "Other",
+      TRUE ~ "Missing/Unknown"),
+    mom_race = factor(mom_race, 
+                      levels = c("Black", "White", "Other", "Missing/Unknown")))
+
+kable_fmr_race_ci <- table_fmr_race_ci |>
+  knitr::kable(
+    col.names = c(
+      "Race",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate by Race, Saint Louis County, 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 4, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_fmr_race_ci
+#kable_fmr_race_ci
+
+```
+
+\newpage
+### Table 3: Fetal Mortality Rate by Race, Saint Louis County, 2019 to 2023
+```{r table_03, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_fmr_race_ci
+```
+
+<!-- ## Trend:Annual FMR by Racial Groups -->
+
+```{r}
+# Calculate annual fetal mortality rate by race, Saint Louis County 2019 to 2023
+trend_fmr_race <- stlco_fetal_deaths |>
+  dplyr::count(year, mom_race, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> dplyr::count(year, mom_race, name = "live_births"),
+    by = c("year", "mom_race")
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) |>
+  dplyr::arrange(
+    year,
+    desc(fetal_deaths)
+  )
+
+#trend_fmr_race
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: trend_fmr_race
+
+trend_fmr_race_ci <- trend_fmr_race |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#trend_fmr_race_ci
+```
+
+```{r}
+# Tables using Kable
+# data: trend_fmr_race_ci
+
+table_trend_fmr_race_ci <- trend_fmr_race_ci |>
+  select(year,
+         mom_race,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total),
+    mom_race = case_when(
+      mom_race == "black" ~ "Black",
+      mom_race == "white" ~ "White",
+      mom_race == "other" ~ "Other",
+      TRUE ~ "Missing/Unknown"),
+    mom_race = factor(mom_race, 
+                      levels = c("Black", "White", "Other", "Missing/Unknown")))
+
+
+kable_trend_fmr_race_ci <- table_trend_fmr_race_ci |>
+  knitr::kable(
+    col.names = c(
+      "Year",
+      "Race",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births/fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate by Race, Saint Louis County, 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 5, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_trend_fmr_race_ci
+#kable_trend_fmr_race_ci
+```
+
+### Table 4: Fetal Mortality Rate by Race, Saint Louis County, 2019 to 2023
+```{r table_04, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_trend_fmr_race_ci
+```
+
+```{r}
+#data: table_trend_fmr_race_ci
+
+# Filter out Missing/Unknown for ggplot
+table_trend_fmr_race_ci_drop <- table_trend_fmr_race_ci |>
+  dplyr::filter(mom_race != "Missing/Unknown")
+```
+
+```{r}
+# Plot 1
+# data: table_trend_fmr_race_ci_drop
+
+plot_table_trend_fmr_race_ci_drop <- table_trend_fmr_race_ci_drop |>
+  ggplot(
+    aes(x = year, y = fmr_per_1000,
+        group = mom_race,
+        color = mom_race, fill = mom_race)) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper), 
+    alpha = 0.15, 
+    color = NA) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_y_continuous(
+    limits = c(0, 15),
+    breaks = seq(0, 15, 3)) +
+  scale_color_manual(values = c(
+    "Black" = "#8FBF87",
+    "White" = "#4A6FA5",
+    "Other" = "#F28C6B"),
+    name = "Maternal Race") +
+  scale_fill_manual(values = c(
+    "Black" = "#8FBF87",
+    "White" = "#4A6FA5",
+    "Other" = "#F28C6B"),
+    name = "Maternal Race") +
+  labs(
+    title = "Annual Fetal Mortality Rate by Maternal Race, St. Louis County, 2019-2023",
+    subtitle = "Rate per 1,000 live births and fetal deaths",
+    x = NULL,
+    y = "FMR",
+    caption = "Shaded area represents 95% confidence interval") +
+  theme(
+    plot.margin = margin(20, 20, 20, 20, "pt"),
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = size$base),
+    axis.text = element_text(size = size$sm),
+    legend.title = element_text(size = size$sm),
+    legend.text = element_text(size = size$sm),
+    legend.position = "top",
+    plot.title = element_text(size = size$lg,
+                              margin = margin(b = 5)),
+    plot.subtitle = element_text(size = size$base,
+                                 margin = margin(b = 3)),
+    plot.caption = element_text(hjust = 0,
+                                size = size$sm),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_rect(
+      color = "grey95",
+      fill = NA,
+      linewidth = 0.5),     # inside plot border
+    panel.background = element_rect(
+      color = NA,
+      fill = "grey98"),    # only inside plot area
+    plot.background = element_rect(
+      color = "white",
+      fill = NA,            # fill all plot area
+      linewidth = 0)
+  )
+
+#plot_table_trend_fmr_race_ci_drop
+```
+
+\newpage
+### Figure 2: Annual Fetal Mortality Rate by Race, Saint Louis County, 2019 to 2023
+```{r figure_02, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+plot_table_trend_fmr_race_ci_drop
+```
+
+
+<!-- # Fetal Mortality Rate by Sex -->
+```{r}
+# Calculate annual fetal mortality rate by Sex, Saint Louis County 2019 to 2023
+fmr_sex <- stlco_fetal_deaths |>
+  dplyr::count(sex, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> dplyr::count(sex, name = "live_births"),
+    by = "sex"
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) |>
+  dplyr::arrange(
+    desc(fetal_deaths)
+  )
+
+#fmr_sex
+
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: fmr_sex
+
+fmr_sex_ci <- fmr_sex |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#fmr_sex_ci
+
+```
+
+```{r}
+# Tables using Kable
+# data: fmr_sex_ci
+
+table_fmr_sex_ci <- fmr_sex_ci |>
+  select(sex,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total)) 
+
+
+kable_fmr_sex_ci <- table_fmr_sex_ci |>
+  knitr::kable(
+    col.names = c(
+      "Sex",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate by Sex, Saint Louis County, 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 4, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_fmr_sex_ci
+#kable_fmr_sex_ci
+```
+
+\newpage
+### Table 5: Fetal Mortality Rate by Sex, Saint Louis County, 2019 to 2023
+```{r table_05, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_fmr_sex_ci
+```
+
+
+<!-- ## Trend: Annual FMR by Sex -->
+```{r}
+# Calculate annual fetal mortality rate by Sex, Saint Louis County 2019 to 2023
+trend_fmr_sex <- stlco_fetal_deaths |>
+  dplyr::count(year, sex, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> dplyr::count(year, sex, name = "live_births"),
+    by = c("year", "sex")
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) |>
+  dplyr::arrange(
+    year,
+    desc(fetal_deaths)
+  )
+
+#trend_fmr_sex
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: trend_fmr_sex
+
+trend_fmr_sex_ci <- trend_fmr_sex |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#trend_fmr_sex_ci
+```
+
+```{r}
+# Tables using Kable
+# data: trend_fmr_sex_ci
+
+table_trend_fmr_sex_ci <- trend_fmr_sex_ci |>
+  select(year,
+         sex,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total))
+
+kable_trend_fmr_sex_ci <- table_trend_fmr_sex_ci |>
+  knitr::kable(
+    col.names = c(
+      "Year",
+      "Sex",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Annual Fetal Mortality Rate by Sex, Saint Louis County 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 5, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_trend_fmr_sex_ci
+#kable_trend_fmr_sex_ci
+```
+
+### Table 6: Annual Fetal Mortality Rate by Sex, Saint Louis County, 2019 to 2023
+```{r table_06, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_trend_fmr_sex_ci
+```
+
+```{r}
+# as numeric for ggplot
+#data: trend_fmr_sex_ci
+
+table_trend_fmr_sex_ci_num <- trend_fmr_sex_ci |>
+  select(year,
+         sex,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::filter(sex != "U") |>
+  dplyr::mutate(
+    sex_label = case_when(
+      sex == "M" ~ "Male",
+      sex == "F" ~ "Female"),
+    sex_label = factor(sex_label, 
+                      levels = c("Male", "Female")))
+```
+
+
+
+```{r}
+#plot
+# data: table_trend_fmr_sex_ci_num
+
+plot_table_trend_fmr_sex_ci_num <- table_trend_fmr_sex_ci_num |>
+  ggplot(aes(x = year, y = fmr_per_1000, color = sex_label, fill = sex_label, group = sex_label)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), 
+              alpha = 0.15,
+              color = NA) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c(
+    "Male" = "#8FBF87",
+    "Female" = "#F28C6B"),
+    name = "Sex") +
+  scale_fill_manual(values = c(
+    "Male" = "#8FBF87",
+    "Female" = "#F28C6B"),
+    name = "Sex") +
+  labs(
+    title = "Annual Fetal Mortality Rate by Sex, St. Louis County, 2019-2023",
+    subtitle = "Rate per 1,000 live births and fetal deaths",
+    x = NULL,
+    y = "FMR",
+    caption = "Shaded area represents 95% confidence interval") +
+  theme(
+    plot.margin = margin(20, 20, 20, 20, "pt"),
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = size$base),
+    axis.text = element_text(size = size$sm),
+    legend.title = element_text(size = size$sm),
+    legend.text = element_text(size = size$sm),
+    legend.position = "top",
+    plot.title = element_text(size = size$lg,
+                              margin = margin(b = 5)),
+    plot.subtitle = element_text(size = size$base,
+                                 margin = margin(b = 3)),
+    plot.caption = element_text(hjust = 0,
+                                size = size$sm),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_rect(
+      color = "grey95",
+      fill = NA,
+      linewidth = 0.5),     # inside plot border
+    panel.background = element_rect(
+      color = NA,
+      fill = "grey98"),    # only inside plot area
+    plot.background = element_rect(
+      color = "white",
+      fill = NA,            # fill all plot area
+      linewidth = 0)
+  )
+
+#plot_table_trend_fmr_sex_ci_num
+```
+
+
+### Figure 3: Annual Fetal Mortality Rate by Sex, Saint Louis County, 2019 to 2023
+
+```{r figure_03, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+plot_table_trend_fmr_sex_ci_num
+```
+
+
+
+<!-- # Fetal Mortality Rate by Maternal Age Groups -->
+```{r}
+# Function for creating maternal age groups
+create_age_groups <- function(age) {
+  dplyr::case_when(
+    age < 15 ~ "Under 15",
+    age >= 15 & age <= 19 ~ "15-19",
+    age >= 20 & age <= 24 ~ "20-24",
+    age >= 25 & age <= 29 ~ "25-29",
+    age >= 30 & age <= 34 ~ "30-34",
+    age >= 35 & age <= 39 ~ "35-39",
+    age >= 40 & age <= 44 ~ "40-44",
+    age >= 45 ~ "45+",
+    TRUE ~ NA_character_
+  )
+}
+```
+
+```{r}
+# Calculate fetal mortality rate by maternal age group, Saint Louis County 2019 to 2023
+fmr_age_group <- stlco_fetal_deaths |>
+  dplyr::mutate(age_group = create_age_groups(mom_age)) |>
+  dplyr::count(age_group, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> 
+      dplyr::mutate(age_group = create_age_groups(mom_age)) |>
+      dplyr::count(age_group, name = "live_births"),
+    by = "age_group"
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) 
+
+#fmr_age_group
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: fmr_age_group
+
+fmr_age_group_ci <- fmr_age_group |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#fmr_age_group_ci
+```
+
+```{r}
+# Tables using Kable
+# data: fmr_age_group_ci
+
+table_fmr_age_group_ci <- fmr_age_group_ci |>
+  select(age_group,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total))
+
+kable_fmr_age_group_ci <- table_fmr_age_group_ci |>
+  knitr::kable(
+    col.names = c(
+      "Age Group",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate by Maternal Age Group, Saint Louis County 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 4, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_fmr_age_group_ci
+#kable_fmr_age_group_ci
+```
+
+\newpage
+### Table 7: Fetal Mortality Rate by Maternal Age Group, Saint Louis County, 2019 to 2023
+```{r table_07, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_fmr_age_group_ci
+```
+
+
+<!-- ## Trend: Annual FMR by Maternal Age -->
+```{r}
+# Calculate annual fmr by maternal age group, Saint Louis County 2019 to 2023
+trend_fmr_age_group <- stlco_fetal_deaths |>
+  dplyr::mutate(age_group = create_age_groups(mom_age)) |>
+  dplyr::count(year, age_group, name = "fetal_deaths") |>
+  dplyr::left_join(
+    stlco_births |> 
+      dplyr::mutate(age_group = create_age_groups(mom_age)) |>
+      dplyr::count(year, age_group, name = "live_births"),
+    by = c("year", "age_group")
+  ) |>
+  dplyr::mutate(
+    total = live_births + fetal_deaths,
+    fmr_per_1000 = (fetal_deaths / total) * 1000
+  ) 
+
+#trend_fmr_age_group
+```
+
+```{r}
+# Calculating 95% CI 
+# using Poisson Distribution (deaths < 100) or Normal Distribution (deaths >= 100)
+# data: trend_fmr_age_group
+
+trend_fmr_age_group_ci <- trend_fmr_age_group |>
+  mutate(
+    adj_fetal_deaths = calculate_adj_fetal_deaths(fetal_deaths, total),
+    lower_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * l_poisson(adj_fetal_deaths)),
+    upper_poisson = case_when(
+      adj_fetal_deaths < 1 ~ NA_real_,
+      TRUE ~ fmr_per_1000 * u_poisson(adj_fetal_deaths)),
+    rse = calculate_rse(fetal_deaths, total),
+    lower_normal = fmr_per_1000 - (1.96 * fmr_per_1000 * rse/100),
+    upper_normal = fmr_per_1000 + (1.96 * fmr_per_1000 * rse/100),
+    lower = dplyr::case_when(
+      fetal_deaths >= 100 ~ lower_normal,
+      TRUE ~ lower_poisson),
+    upper = dplyr::case_when(
+      fetal_deaths >= 100 ~ upper_normal,
+      TRUE ~ upper_poisson),
+    ci_method = dplyr::case_when(
+      fetal_deaths >= 100 ~ "Normal",
+      TRUE ~ "Poisson")
+  )
+
+#trend_fmr_age_group_ci
+```
+
+```{r}
+# Tables using Kable
+# data: fmr_age_group_ci
+
+table_trend_fmr_age_group_ci <- trend_fmr_age_group_ci |>
+  select(year,
+         age_group,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    live_births = scales::comma(live_births),
+    total = scales::comma(total))
+
+kable_trend_fmr_age_group_ci <- table_trend_fmr_age_group_ci |>
+  knitr::kable(
+    col.names = c(
+      "Year",
+      "Age Group",
+      "Fetal Deaths",
+      "Live Births",
+      "Total",
+      "per 1000 live births and fetal deaths",
+      "Lower",
+      "Upper",
+      "CI Method"),
+    digits = 2,
+    caption = "Fetal Mortality Rate by Maternal Age Group, Saint Louis County 2019 to 2023") |>
+  kableExtra::add_header_above(c(" " = 5, "Fetal Mortality Rate" = 1, "95% CI" = 2, " " = 1)) |>
+  kableExtra::kable_styling(latex_options = c("HOLD_position", "scale down"), 
+                full_width = FALSE,
+                position = "center")
+
+#table_trend_fmr_age_group_ci
+#kable_trend_fmr_age_group_ci
+```
+
+
+## Table 8: Annual Fetal Mortality Rate by Maternal Age Group, Saint Louis County, 2019 to 2023
+```{r table_08, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+kable_trend_fmr_age_group_ci
+```
+
+```{r}
+# table with live births and total as numeric for ggplot
+# data: trend_fmr_age_group_ci
+
+table_trend_fmr_age_group_ci_num <- trend_fmr_age_group_ci |>
+  select(year,
+         age_group,
+         fetal_deaths,
+         live_births,
+         total,
+         fmr_per_1000,
+         lower,
+         upper,
+         ci_method) |>
+  dplyr::mutate(
+    age_group = factor(age_group, 
+                       levels = c("15-19", "20-24", "25-29", "30-34", "35-39", "40-44")))
+```
+
+
+```{r}
+#Plot 
+# data: table_trend_fmr_age_group_ci_num or table_trend_fmr_age_group_ci
+
+plot_table_trend_fmr_age_group_ci <- table_trend_fmr_age_group_ci |>
+  ggplot(aes(x = year, y = fmr_per_1000)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper),
+              alpha = 0.2,
+              fill = "#2c3e50") +
+  geom_line(
+    linewidth = 0.8,
+    color = "#2c3e50") +
+  geom_point(
+    size = 1.5,
+    color = "#2c3e50") +
+  #geom_text(
+    #aes(label = sprintf("%.2f", fmr_per_1000)),
+    #vjust = -0.8) +
+  facet_wrap(
+    ~ age_group,
+    ncol = 3, 
+    scales = "fixed") +
+  scale_x_continuous(
+    breaks = c(2019, 2021, 2023)) +
+  labs(
+    title = "Fetal Mortality Rate by Maternal Age Group, St. Louis County, 2019-2023",
+    subtitle = "Rate per 1,000 live births and fetal deaths",
+    x = NULL,
+    y = "FMR",
+    caption = "Shaded area represents 95% confidence interval") +
+  theme(
+    plot.margin = margin(20, 20, 20, 20, "pt"),
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = size$base),
+    axis.text = element_text(size = size$sm),
+    legend.title = element_text(size = size$sm),
+    legend.text = element_text(size = size$sm),
+    legend.position = "top",
+    plot.title = element_text(size = size$lg,
+                              margin = margin(b = 5)),
+    plot.subtitle = element_text(size = size$base,
+                                 margin = margin(b = 3)),
+    plot.caption = element_text(hjust = 0,
+                                size = size$sm),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_rect(
+      color = "grey95",
+      fill = NA,
+      linewidth = 0.5),     # inside plot border
+    panel.background = element_rect(
+      color = NA,
+      fill = "grey98"),    # only inside plot area
+    plot.background = element_rect(
+      color = "white",
+      fill = NA,            # fill all plot area
+      linewidth = 0)
+  )
+  
+#plot_table_trend_fmr_age_group_ci
+```
+
+\newpage
+## Figure 4: Annual Fetal Mortality Rate by Maternal Age Group, Saint Louis County, 2019 to 2023
+```{r figure_04, fig.width=8, fig.asp=0.618, fig.align='center', out.width="\\textwidth"}
+
+plot_table_trend_fmr_age_group_ci
+```
+
+
+# Reference
+
+1. Centers for Disease Control and Prevention. (2023). User guide to the 2023 fetal death public use file. https://ftp.cdc.gov/pub/Health_Statistics/NCHS/Dataset_Documentation/DVS/fetaldeath/2023fetaluserguide.pdf
+
+2. MacDorman, M. F., & Gregory, E. C. W. (2015, July 23). Fetal and perinatal mortality: United States, 2013 (National Center for Health Statistics. Vital and Health Statistics, 64[8], 1–24). https://stacks.cdc.gov/view/cdc/231851
+
+
